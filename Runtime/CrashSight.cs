@@ -30,9 +30,22 @@ namespace CrashSightLib.Runtime
                 private static extern void CS_ReportException(string exceptionName, string message, string stack);
                 [DllImport("__Internal")]
                 private static extern string CS_JSBacktrace(int skipCount, string excludeFilter, int limitCount);
+                [DllImport("__Internal")]
+                private static extern void CS_PrintLog(int level, string message);
+                [DllImport("__Internal")]
+                private static extern void CS_ConfigLogLevel(int level);
 
 
 
+                public enum CSLogSeverity
+                {
+                        LogSilent,
+                        LogError,
+                        LogWarning,
+                        LogInfo,
+                        LogDebug,
+                        LogVerbose
+                }
 
 
 
@@ -217,6 +230,27 @@ namespace CrashSightLib.Runtime
                 public static string JSBacktrace(int skipCount, string excludeFilter = null, int limitCount = 0)
                 {
                         return CS_JSBacktrace(skipCount, excludeFilter, limitCount);
+                }
+
+                /// <summary>
+                /// 添加自定义日志
+                /// </summary>
+                /// <param name="level"></param>
+                /// <param name="message"></param>
+                public static void PrintLog(CSLogSeverity level, string message)
+                {
+                        LoadSDK();
+                        CS_PrintLog((int)level, message);
+                }
+
+                /// <summary>
+                /// 设置自定义日志等级
+                /// </summary>
+                /// <param name="level"></param>
+                public static void ConfigLogLevel(CSLogSeverity level)
+                {
+                        LoadSDK();
+                        CS_ConfigLogLevel((int)level);
                 }
 
 
