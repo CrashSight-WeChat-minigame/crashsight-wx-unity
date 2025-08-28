@@ -3,6 +3,7 @@
     "references": [],
     "includePlatforms": [
         "WebGL",
-        "Editor"
+        "Editor",
+		"WeixinMiniGame"
     ]
 }
