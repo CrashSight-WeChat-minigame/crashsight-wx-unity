@@ -1170,12 +1170,24 @@ mergeInto(LibraryManager.library, {
       if (strategyEnableState == StrategyEnableState.Enable) {
         var message = 'unkonw';
         var stack = '';
-        if (result) {
-          if (typeof result.reason === 'string') {
-            message = result.reason;
-          } else if (_typeof(result.reason) === 'object') {
-            message = result.reason.message;
-            stack = result.reason.stack;
+        var reason = result ? result.reason : undefined;
+        if (reason && _typeof(reason) === 'object' && (typeof reason.message !== 'undefined' || typeof reason.stack !== 'undefined')) {
+          if (typeof reason.message !== 'undefined') {
+            message = reason.message;
+          }
+          if (typeof reason.stack !== 'undefined') {
+            stack = reason.stack;
+          }
+        } else {
+          try {
+            message = _typeof(result) === 'object' ? JSON.stringify(result) : String(result);
+          } catch (error) {
+            message = String(result);
+          }
+          try {
+            throw new Error('Unhandled Rejection Promise Error');
+          } catch (error) {
+            stack = error && error.stack ? error.stack : '';
           }
         }
         sendErrorMessage('Unhandle Rejection Promise Error', message, stack);
