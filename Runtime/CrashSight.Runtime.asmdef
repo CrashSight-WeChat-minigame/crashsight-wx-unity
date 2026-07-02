@@ -1,9 +1,9 @@
 {
     "name": "CrashSight",
     "references": [],
-    "includePlatforms": [
-        "WebGL",
-        "Editor",
-		"WeixinMiniGame"
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "defineConstraints": [
+        "UNITY_WEBGL || WEIXINMINIGAME || PLATFORM_WEIXINMINIGAME"
     ]
 }
