@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using System.Runtime.InteropServices;
 using System;
+using AOT;
 
 // REALLY stop code-stripping removing GB. We mean it!
 namespace CrashSightLib.Runtime
@@ -23,13 +24,19 @@ namespace CrashSightLib.Runtime
                 [DllImport("__Internal")]
                 private static extern void CS_SetWXAppIdentify(string identify);
                 [DllImport("__Internal")]
+                private static extern void CS_SetAppIdentify(string identify);
+                [DllImport("__Internal")]
                 private static extern void CS_SetExtKV(string key, string value);
                 [DllImport("__Internal")]
                 private static extern void CS_ClearExtKV();
                 [DllImport("__Internal")]
-                private static extern void CS_SetExtraMessage(string extraMessage);
+                private static extern void CS_RegisterManagedExtraMessageCallback(IntPtr getter);
                 [DllImport("__Internal")]
-                private static extern void CS_ReportException(string exceptionName, string message, string stack);
+                private static extern void CS_ReportException(string exceptionName, string message, string stack, string attachmentPaths);
+                [DllImport("__Internal")]
+                private static extern void CS_ReportCapturedException(string exceptionName, string message, string stack);
+                [DllImport("__Internal")]
+                private static extern void CS_SetAttachmentPaths(string pipeSeparatedPaths);
                 [DllImport("__Internal")]
                 private static extern string CS_JSBacktrace(int skipCount, string excludeFilter, int limitCount);
                 [DllImport("__Internal")]
@@ -62,20 +69,16 @@ namespace CrashSightLib.Runtime
 
                 private static bool hasLoadSDK = false;
 
-                private static void LoadSDK()
-                {
-                        if (!hasLoadSDK)
-                        {
-                                CS_Load();
-                        }
-                        hasLoadSDK = true;
-                }
+                private delegate IntPtr ManagedExtraMessageGetterDelegate();
 
-                private static void PushExtraMessageForNextReport()
+                private static readonly ManagedExtraMessageGetterDelegate ManagedExtraMessageGetterInstance = GetManagedExtraMessageThunk;
+
+                [MonoPInvokeCallback(typeof(ManagedExtraMessageGetterDelegate))]
+                private static IntPtr GetManagedExtraMessageThunk()
                 {
                         if (extraMessageCallback == null)
                         {
-                                return;
+                                return IntPtr.Zero;
                         }
                         try
                         {
@@ -84,13 +87,48 @@ namespace CrashSightLib.Runtime
                                 {
                                         extraMsg = "";
                                 }
-                                CS_SetExtraMessage(extraMsg);
+                                return AllocUtf8ZeroTerminated(extraMsg);
                         }
                         catch (Exception e)
                         {
                                 Debug.LogWarning("[CrashSight] extraMessageCallback error: " + e);
-                                CS_SetExtraMessage("");
+                                return IntPtr.Zero;
                         }
+                }
+
+                private static IntPtr AllocUtf8ZeroTerminated(string s)
+                {
+                        if (s == null)
+                        {
+                                s = "";
+                        }
+                        byte[] bytes = System.Text.Encoding.UTF8.GetBytes(s);
+                        IntPtr ptr = Marshal.AllocHGlobal(bytes.Length + 1);
+                        Marshal.Copy(bytes, 0, ptr, bytes.Length);
+                        Marshal.WriteByte(ptr, bytes.Length, 0);
+                        return ptr;
+                }
+
+                private static bool hasRegisteredManagedExtraMessageCallback = false;
+
+                private static void RegisterManagedExtraMessageCallbackOnce()
+                {
+                        if (hasRegisteredManagedExtraMessageCallback)
+                        {
+                                return;
+                        }
+                        hasRegisteredManagedExtraMessageCallback = true;
+                        CS_RegisterManagedExtraMessageCallback(Marshal.GetFunctionPointerForDelegate(ManagedExtraMessageGetterInstance));
+                }
+
+                private static void LoadSDK()
+                {
+                        if (!hasLoadSDK)
+                        {
+                                CS_Load();
+                                RegisterManagedExtraMessageCallbackOnce();
+                        }
+                        hasLoadSDK = true;
                 }
 
 
@@ -108,8 +146,7 @@ namespace CrashSightLib.Runtime
                                 if (args.ExceptionObject.GetType() == typeof(System.Exception))
                                 {
                                         System.Exception exception = (System.Exception)args.ExceptionObject;
-                                        PushExtraMessageForNextReport();
-                                        CS_ReportException("Unity Uncaught Exception", exception.Message, exception.StackTrace);
+                                        CS_ReportCapturedException("Unity Uncaught Exception", exception.Message, exception.StackTrace);
                                         return;
                                 }
                         }
@@ -135,13 +172,11 @@ namespace CrashSightLib.Runtime
                                 }
                                 if (enableAutoFetchJSScriptOnUnCatchedExceptionCalllback)
                                 {
-                                        PushExtraMessageForNextReport();
-                                        CS_ReportException("Unity Exception Log", condition, stackTrace + "\njavascript stack:\n" + JSBacktrace(5, autoFetchJSScriptOnUnCatchedExceptionExcludeFilter, autoFetchJSScriptOnUnCatchedExceptionLimitCount));
+                                        CS_ReportCapturedException("Unity Exception Log", condition, stackTrace + "\njavascript stack:\n" + JSBacktrace(5, autoFetchJSScriptOnUnCatchedExceptionExcludeFilter, autoFetchJSScriptOnUnCatchedExceptionLimitCount));
                                 }
                                 else
                                 {
-                                        PushExtraMessageForNextReport();
-                                        CS_ReportException("Unity Exception Log", condition, stackTrace);
+                                        CS_ReportCapturedException("Unity Exception Log", condition, stackTrace);
                                 }
                         }
 
@@ -214,13 +249,23 @@ namespace CrashSightLib.Runtime
 
 
                 /// <summary>
-                /// 设置App唯一标识
+                /// 设置App唯一标识（兼容旧微信小游戏接入名）
                 /// </summary>
                 /// <param name="identify"></param>
                 public static void SetWXAppIdentify(string identify)
                 {
                         LoadSDK();
                         CS_SetWXAppIdentify(identify);
+                }
+
+                /// <summary>
+                /// 设置App唯一标识（QQ / 微信 / WebGL 通用）
+                /// </summary>
+                /// <param name="identify"></param>
+                public static void SetAppIdentify(string identify)
+                {
+                        LoadSDK();
+                        CS_SetAppIdentify(identify);
                 }
 
                 /// <summary>
@@ -247,21 +292,26 @@ namespace CrashSightLib.Runtime
                 /// <summary>
                 /// 上报自定义异常
                 /// </summary>
-                /// <param name="exceptionName"></param>
-                /// <param name="message"></param>
-                /// <param name="stack"></param>
-                public static void ReportException(string exceptionName, string message, string stack, string excludeFilter = null, int limitCount = 0, bool appendJSException = true)
+                public static void ReportException(string exceptionName, string message, string stack, string excludeFilter = null, int limitCount = 0, bool appendJSException = true, string attachmentPaths = null)
                 {
                         LoadSDK();
-                        PushExtraMessageForNextReport();
                         if (appendJSException)
                         {
-                                CS_ReportException(exceptionName, message, stack + "\njavascript stack:\n" + JSBacktrace(5, excludeFilter, limitCount));
+                                CS_ReportException(exceptionName, message, stack + "\njavascript stack:\n" + JSBacktrace(5, excludeFilter, limitCount), attachmentPaths);
                         }
                         else
                         {
-                                CS_ReportException(exceptionName, message, stack);
+                                CS_ReportException(exceptionName, message, stack, attachmentPaths);
                         }
+                }
+
+                /// <summary>
+                /// 预设 COS 附件路径（「|」分隔）
+                /// </summary>
+                public static void SetAttachmentPaths(string pipeSeparatedPaths)
+                {
+                        LoadSDK();
+                        CS_SetAttachmentPaths(pipeSeparatedPaths);
                 }
 
                 /// <summary>
