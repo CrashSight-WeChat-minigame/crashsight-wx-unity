@@ -27,9 +27,15 @@ namespace CrashSightLib.Runtime
                 [DllImport("__Internal")]
                 private static extern void CS_ClearExtKV();
                 [DllImport("__Internal")]
+                private static extern void CS_SetExtraMessage(string extraMessage);
+                [DllImport("__Internal")]
                 private static extern void CS_ReportException(string exceptionName, string message, string stack);
                 [DllImport("__Internal")]
                 private static extern string CS_JSBacktrace(int skipCount, string excludeFilter, int limitCount);
+                [DllImport("__Internal")]
+                private static extern void CS_JSTestJSException();
+                [DllImport("__Internal")]
+                private static extern void CS_JSTestReject();
                 [DllImport("__Internal")]
                 private static extern void CS_PrintLog(int level, string message);
                 [DllImport("__Internal")]
@@ -52,6 +58,7 @@ namespace CrashSightLib.Runtime
                 private static bool enableAutoFetchJSScriptOnUnCatchedExceptionCalllback = false;
                 private static string autoFetchJSScriptOnUnCatchedExceptionExcludeFilter = null;
                 private static int autoFetchJSScriptOnUnCatchedExceptionLimitCount = 0;
+                private static Func<string> extraMessageCallback = null;
 
                 private static bool hasLoadSDK = false;
 
@@ -62,6 +69,28 @@ namespace CrashSightLib.Runtime
                                 CS_Load();
                         }
                         hasLoadSDK = true;
+                }
+
+                private static void PushExtraMessageForNextReport()
+                {
+                        if (extraMessageCallback == null)
+                        {
+                                return;
+                        }
+                        try
+                        {
+                                string extraMsg = extraMessageCallback();
+                                if (extraMsg == null)
+                                {
+                                        extraMsg = "";
+                                }
+                                CS_SetExtraMessage(extraMsg);
+                        }
+                        catch (Exception e)
+                        {
+                                Debug.LogWarning("[CrashSight] extraMessageCallback error: " + e);
+                                CS_SetExtraMessage("");
+                        }
                 }
 
 
@@ -79,6 +108,7 @@ namespace CrashSightLib.Runtime
                                 if (args.ExceptionObject.GetType() == typeof(System.Exception))
                                 {
                                         System.Exception exception = (System.Exception)args.ExceptionObject;
+                                        PushExtraMessageForNextReport();
                                         CS_ReportException("Unity Uncaught Exception", exception.Message, exception.StackTrace);
                                         return;
                                 }
@@ -105,10 +135,12 @@ namespace CrashSightLib.Runtime
                                 }
                                 if (enableAutoFetchJSScriptOnUnCatchedExceptionCalllback)
                                 {
+                                        PushExtraMessageForNextReport();
                                         CS_ReportException("Unity Exception Log", condition, stackTrace + "\njavascript stack:\n" + JSBacktrace(5, autoFetchJSScriptOnUnCatchedExceptionExcludeFilter, autoFetchJSScriptOnUnCatchedExceptionLimitCount));
                                 }
                                 else
                                 {
+                                        PushExtraMessageForNextReport();
                                         CS_ReportException("Unity Exception Log", condition, stackTrace);
                                 }
                         }
@@ -149,6 +181,14 @@ namespace CrashSightLib.Runtime
                         enableAutoFetchJSScriptOnUnCatchedExceptionCalllback = enable;
                         autoFetchJSScriptOnUnCatchedExceptionExcludeFilter = excludeFilter;
                         autoFetchJSScriptOnUnCatchedExceptionLimitCount = limitCount;
+                }
+
+                /// <summary>
+                /// 设置额外信息回调。每次异常上报前都会调用，返回内容会作为 extraMsg 独立字段上传。
+                /// </summary>
+                public static void SetExtraMessageCallback(Func<string> callback)
+                {
+                        extraMessageCallback = callback;
                 }
 
                 /// <summary>
@@ -213,6 +253,7 @@ namespace CrashSightLib.Runtime
                 public static void ReportException(string exceptionName, string message, string stack, string excludeFilter = null, int limitCount = 0, bool appendJSException = true)
                 {
                         LoadSDK();
+                        PushExtraMessageForNextReport();
                         if (appendJSException)
                         {
                                 CS_ReportException(exceptionName, message, stack + "\njavascript stack:\n" + JSBacktrace(5, excludeFilter, limitCount));
@@ -230,6 +271,24 @@ namespace CrashSightLib.Runtime
                 public static string JSBacktrace(int skipCount, string excludeFilter = null, int limitCount = 0)
                 {
                         return CS_JSBacktrace(skipCount, excludeFilter, limitCount);
+                }
+
+                /// <summary>
+                /// 调试：触发 JS 侧异常（需 .jslib 实现 CS_JSTestJSException）
+                /// </summary>
+                public static void JSTestJSException()
+                {
+                        LoadSDK();
+                        CS_JSTestJSException();
+                }
+
+                /// <summary>
+                /// 调试：触发 JS 侧 Promise reject（需 .jslib 实现 CS_JSTestReject）
+                /// </summary>
+                public static void JSTestReject()
+                {
+                        LoadSDK();
+                        CS_JSTestReject();
                 }
 
                 /// <summary>
@@ -259,4 +318,3 @@ namespace CrashSightLib.Runtime
 
 
 }
-
